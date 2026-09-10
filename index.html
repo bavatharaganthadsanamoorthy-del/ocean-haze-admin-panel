@@ -218,7 +218,7 @@
       <div class="top-bar-right">
         <span class="top-tag" id="topDate"></span>
         <button class="refresh-btn" onclick="refreshAll()">↻ Refresh</button>
-        <a class="visit-btn" href="index.html" target="_blank">🌊 Visit Site ↗</a>
+        <a class="visit-btn" href="ocean-haze.html" target="_blank">🌊 Visit Site ↗</a>
       </div>
     </div>
 
@@ -294,7 +294,7 @@
         </div>
         <div class="set-card glass">
           <h3>Data Management</h3>
-          <p style="font-size:.72rem;color:var(--tm);line-height:1.8;margin-bottom:1rem;">Manage shared online order records. Export for reporting or clear completed orders.</p>
+          <p style="font-size:.72rem;color:var(--tm);line-height:1.8;margin-bottom:1rem;">Manage order records stored locally. Export for reporting or clear completed orders.</p>
           <button class="export-btn" onclick="exportOrders()">⬇ Export Orders (JSON)</button>
           <button class="clear-btn" onclick="clearDelivered()">🗑 Clear Delivered Orders</button>
         </div>
@@ -305,16 +305,6 @@
 
 <div class="toast glass" id="toast"></div>
 
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script>
-  // Replace these two values with your Supabase Project URL and anon/public key.
-  const SUPABASE_URL = "YOUR_SUPABASE_URL";
-  const SUPABASE_ANON_KEY = "YOUR_SUPABASE_ANON_KEY";
-  const supabaseClient = window.supabase.createClient(
-    SUPABASE_URL,
-    SUPABASE_ANON_KEY
-  );
-</script>
 <script>
 let currentFilter='all';
 
@@ -347,56 +337,21 @@ function showPanel(p){
 }
 
 // ── DATA ──
-let ordersCache=[];
-
-async function getOrders(){
-  const {data,error}=await supabaseClient
-    .from('orders')
-    .select('*')
-    .order('created_at',{ascending:false});
-
-  if(error){
-    console.error('Could not load orders:',error);
-    showToast('❌ Could not load orders');
-    return ordersCache;
-  }
-
-  ordersCache=data||[];
-  return ordersCache;
-}
+function getOrders(){return JSON.parse(localStorage.getItem('oceanHazeOrders')||'[]');}
+function saveOrders(o){localStorage.setItem('oceanHazeOrders',JSON.stringify(o));}
 
 // ── REFRESH ──
-async function refreshAll(){
-  
-// ── REAL-TIME ORDERS ──
-const orderChannel=supabaseClient
-  .channel('ocean-haze-orders')
-  .on(
-    'postgres_changes',
-    {event:'*',schema:'public',table:'orders'},
-    async payload=>{
-      console.log('Order database change:',payload);
-      await refreshAll();
-
-      if(payload.eventType==='INSERT'){
-        showToast('🔔 NEW ORDER RECEIVED!');
-      }
-    }
-  )
-  .subscribe();
-
-document.getElementById('topDate').innerHTML=`<strong>${new Date().toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long'})}</strong>`;
-  await renderOverview();
-  await renderOrders(currentFilter);
-  await renderAnalytics();
+function refreshAll(){
+  document.getElementById('topDate').innerHTML=`<strong>${new Date().toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long'})}</strong>`;
+  renderOverview();renderOrders(currentFilter);renderAnalytics();
   showToast('✓ Dashboard refreshed');
 }
 
 // ── OVERVIEW ──
-async function renderOverview(){
-  const orders=await getOrders();
-  const revenue=orders.reduce((s,o)=>s+Number(o.total||0),0);
-  const items=orders.reduce((s,o)=>s+(o.items||[]).reduce((a,i)=>a+Number(i.qty||0),0),0);
+function renderOverview(){
+  const orders=getOrders();
+  const revenue=orders.reduce((s,o)=>s+o.total,0);
+  const items=orders.reduce((s,o)=>s+o.items.reduce((a,i)=>a+i.qty,0),0);
   const newCount=orders.filter(o=>o.status==='new').length;
   const avgOrder=orders.length?revenue/orders.length:0;
   const sg=document.getElementById('statsGrid');
@@ -419,8 +374,8 @@ function filterOrders(f,btn){
   btn.classList.add('active');
   renderOrders(f);
 }
-async function renderOrders(f){
-  const orders=await getOrders();
+function renderOrders(f){
+  const orders=getOrders();
   const filtered=f==='all'?orders:orders.filter(o=>o.status===f);
   const el=document.getElementById('allOrders');
   el.innerHTML=filtered.length?filtered.map(o=>orderCardHTML(o)).join(''):`<div class="no-orders glass"><span class="icon">🌊</span>No ${f==='all'?'':f+' '}orders found.</div>`;
@@ -429,20 +384,20 @@ function orderCardHTML(o){
   return`<div class="order-card glass s-${o.status}" id="oc-${o.id}">
     <div class="oc-top">
       <div>
-        <div class="oc-id">#${o.id} &nbsp;·&nbsp; ${o.order_date} ${o.order_time}</div>
+        <div class="oc-id">#${o.id} &nbsp;·&nbsp; ${o.date} ${o.time}</div>
         <div class="oc-name">${o.name}</div>
-        <div class="oc-meta">${o.phone} &nbsp;·&nbsp; ${o.type}${o.table_number?' · Table '+o.table_number:''}</div>
+        <div class="oc-meta">${o.phone} &nbsp;·&nbsp; ${o.type}${o.table?' · Table '+o.table:''}</div>
       </div>
       <span class="sbadge ${o.status}">${o.status.charAt(0).toUpperCase()+o.status.slice(1)}</span>
     </div>
     <div class="oc-items">
-      ${(o.items||[]).map(i=>`${i.emoji||''} <strong>${i.name}</strong> × ${i.qty} &nbsp;(£${(Number(i.price)*Number(i.qty)).toFixed(2)})`).join('<br>')}
+      ${o.items.map(i=>`${i.emoji} <strong>${i.name}</strong> × ${i.qty} &nbsp;(£${(i.price*i.qty).toFixed(2)})`).join('<br>')}
       ${o.notes?`<div class="oc-note">📝 ${o.notes}</div>`:''}
     </div>
     <div class="oc-bottom">
-      <span class="oc-total">£${Number(o.total||0).toFixed(2)}</span>
+      <span class="oc-total">£${o.total.toFixed(2)}</span>
       <div class="oc-right">
-        <span class="oc-time">${o.order_date}</span>
+        <span class="oc-time">${o.date}</span>
         <select class="status-sel glass" onchange="updateStatus('${o.id}',this.value)">
           <option value="new" ${o.status==='new'?'selected':''}>🔔 New</option>
           <option value="preparing" ${o.status==='preparing'?'selected':''}>👨‍🍳 Preparing</option>
@@ -454,59 +409,33 @@ function orderCardHTML(o){
     </div>
   </div>`;
 }
-async function updateStatus(id,status){
-  const {error}=await supabaseClient
-    .from('orders')
-    .update({status})
-    .eq('id',id);
-
-  if(error){
-    console.error('Status update failed:',error);
-    showToast('❌ Could not update order');
-    return;
-  }
-
-  await renderOrders(currentFilter);
-  await renderOverview();
-  await renderAnalytics();
-
+function updateStatus(id,status){
+  const orders=getOrders();
+  const idx=orders.findIndex(o=>o.id===id);
+  if(idx>-1){orders[idx].status=status;saveOrders(orders);}
+  renderOrders(currentFilter);renderOverview();
   showToast('✓ Order #'+id+' → '+status);
 }
-async function deleteOrder(id){
-  if(!confirm('Delete order #'+id+'?')) return;
-
-  const {error}=await supabaseClient
-    .from('orders')
-    .delete()
-    .eq('id',id);
-
-  if(error){
-    console.error('Delete failed:',error);
-    showToast('❌ Could not delete order');
-    return;
-  }
-
-  await renderOrders(currentFilter);
-  await renderOverview();
-  await renderAnalytics();
-
-  showToast('✓ Order deleted');
+function deleteOrder(id){
+  const orders=getOrders().filter(o=>o.id!==id);
+  saveOrders(orders);renderOrders(currentFilter);renderOverview();renderAnalytics();
+  showToast('Order deleted');
 }
 
 // ── ANALYTICS ──
-async function renderAnalytics(){
-  const orders=await getOrders();
+function renderAnalytics(){
+  const orders=getOrders();
   // Category sales
   const cats={starters:0,sambols:0,curries:0,seafood:0,rice:0,drinks:0,desserts:0};
   const itemCount={};
   const typeRev={'dine-in':0,collection:0,delivery:0};
   const statusCount={new:0,preparing:0,ready:0,delivered:0};
   orders.forEach(o=>{
-    typeRev[o.type]=(typeRev[o.type]||0)+Number(o.total||0);
+    typeRev[o.type]=(typeRev[o.type]||0)+o.total;
     statusCount[o.status]=(statusCount[o.status]||0)+1;
     o.items.forEach(i=>{
-      cats[i.cat]=(cats[i.cat]||0)+Number(i.qty||0);
-      itemCount[i.name]=(itemCount[i.name]||0)+Number(i.qty||0);
+      cats[i.cat]=(cats[i.cat]||0)+i.qty;
+      itemCount[i.name]=(itemCount[i.name]||0)+i.qty;
     });
   });
   const maxCat=Math.max(...Object.values(cats),1);
@@ -533,31 +462,16 @@ async function renderAnalytics(){
 }
 
 // ── TOOLS ──
-async function clearDelivered(){
-  if(!confirm('Clear all delivered orders?')) return;
-
-  const {error}=await supabaseClient
-    .from('orders')
-    .delete()
-    .eq('status','delivered');
-
-  if(error){
-    console.error('Clear delivered failed:',error);
-    showToast('❌ Could not clear delivered orders');
-    return;
-  }
-
-  await refreshAll();
-  showToast('✓ Delivered orders cleared');
+function clearDelivered(){
+  const orders=getOrders().filter(o=>o.status!=='delivered');
+  saveOrders(orders);refreshAll();showToast('✓ Delivered orders cleared');
 }
-async function exportOrders(){
-  const orders=await getOrders();
-  const data=JSON.stringify(orders,null,2);
+function exportOrders(){
+  const data=JSON.stringify(getOrders(),null,2);
   const a=document.createElement('a');
   a.href='data:application/json;charset=utf-8,'+encodeURIComponent(data);
   a.download='ocean-haze-orders-'+new Date().toISOString().slice(0,10)+'.json';
-  a.click();
-  showToast('✓ Orders exported');
+  a.click();showToast('✓ Orders exported');
 }
 function showToast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),3000);}
 document.getElementById('topDate').innerHTML=`<strong>${new Date().toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long'})}</strong>`;
